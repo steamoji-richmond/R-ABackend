@@ -32,6 +32,11 @@ export function requireAdmin(req, body = {}) {
   return { success: false, error: 'Admin authentication required' }
 }
 
+export function requireAttend(req, body = {}) {
+  if (isAttendRequest(req, body)) return null
+  return { success: false, error: 'Attendance authentication required' }
+}
+
 export function verifyAdminPassword(password) {
   const pass = String(password || '').trim()
   if (!config.adminPass || pass !== config.adminPass) {
