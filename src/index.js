@@ -5,7 +5,7 @@ import compression from 'compression'
 import morgan from 'morgan'
 import rateLimit from 'express-rate-limit'
 
-import { config, assertConfig } from './config.js'
+import { config, assertConfig, isCorsOriginAllowed } from './config.js'
 import { connectDb, disconnectDb } from './db.js'
 import execRouter from './routes/exec.js'
 import restRouter from './routes/rest.js'
@@ -22,16 +22,28 @@ async function main() {
   app.use(helmet({ crossOriginResourcePolicy: false }))
   app.use(compression())
 
-  // CORS: allow configured origins (or open)
-  const corsAll = config.corsOrigins.length === 1 && config.corsOrigins[0] === '*'
+  // CORS — reflect allowed browser origins; non-browser requests (no Origin) pass through
+  const corsOpen =
+    !config.corsOrigins.length ||
+    (config.corsOrigins.length === 1 && config.corsOrigins[0] === '*')
+
   app.use(
     cors({
-      origin: corsAll ? true : config.corsOrigins,
-      credentials: !corsAll,
+      origin(origin, callback) {
+        if (isCorsOriginAllowed(origin)) {
+          callback(null, corsOpen ? true : origin)
+        } else {
+          console.warn('[cors] blocked origin:', origin)
+          callback(null, false)
+        }
+      },
+      methods: ['GET', 'POST', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Accept'],
+      maxAge: 86400,
     })
   )
 
-  // Capture raw body for text/plain JSON posts (so we can parse JSON from GAS-style requests)
+  // Capture raw body for text/plain JSON posts
   app.use(
     express.raw({
       type: ['text/plain', 'application/json'],
