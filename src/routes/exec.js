@@ -9,6 +9,8 @@ import {
   isAttendRequest,
   requireAdmin,
   requireAttend,
+  verifyAdminPassword,
+  verifyAttendPassword,
 } from '../middleware/auth.js'
 
 const router = express.Router()
@@ -45,6 +47,12 @@ async function handle(req, res) {
 
     let result
     switch (action) {
+      case 'verifyAdmin':
+        result = verifyAdminPassword(body.password || req.query.password)
+        break
+      case 'verifyAttend':
+        result = verifyAttendPassword(body.password || req.query.password)
+        break
       case 'lookup':
         result = await members.lookupByEmail(req.query.email || body.email)
         break
