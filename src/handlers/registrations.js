@@ -5,6 +5,7 @@ import Session from '../models/Session.js'
 import Member from '../models/Member.js'
 import PendingMember from '../models/PendingMember.js'
 import Branch from '../models/Branch.js'
+import { serializeMemberAttend } from './members.js'
 import { computePrice } from '../services/pricing.js'
 import { expandVisibleBranchIds } from './branches.js'
 import {
@@ -13,12 +14,29 @@ import {
 } from '../services/email.js'
 
 /**
- * Read all registrations with member profile joined in.
- * Returns the same flat shape the frontend always had, so no frontend changes
- * are needed.
+ * Read registrations with member profile joined in.
+ * Public callers must pass `email` (own registrations only).
+ * Attendance staff pass attend auth + optional `sessionId`.
+ * Admin sees everything.
  */
-export async function getAllRegistrations() {
-  const rows = await Registration.aggregate([
+export async function getAllRegistrations({
+  email,
+  sessionId,
+  admin = false,
+  attend = false,
+} = {}) {
+  const e = email ? String(email).toLowerCase().trim() : ''
+  const sid = sessionId ? String(sessionId).trim() : ''
+
+  if (!admin && !attend && !e) {
+    return { success: false, error: 'email is required' }
+  }
+
+  const match = {}
+  if (sid) match.sessionId = sid
+
+  const pipeline = [
+    ...(Object.keys(match).length ? [{ $match: match }] : []),
     { $sort: { registeredDateAndTime: -1 } },
     {
       $lookup: {
@@ -38,8 +56,50 @@ export async function getAllRegistrations() {
       },
     },
     { $unwind: { path: '$session', preserveNullAndEmptyArrays: true } },
-  ])
-  return { success: true, registrations: rows.map(serialize) }
+  ]
+
+  if (e && !admin && !attend) {
+    pipeline.push({
+      $match: { 'member.parentEmail': e },
+    })
+  }
+
+  const rows = await Registration.aggregate(pipeline)
+  const scope = admin ? 'admin' : attend ? 'attend' : 'public'
+  return { success: true, registrations: rows.map((r) => serialize(r, scope)) }
+}
+
+/** Session roster for scanner — attend auth required at route level. */
+export async function getSessionScanData(sessionId) {
+  const sid = String(sessionId || '').trim()
+  if (!sid) return { success: false, error: 'sessionId required' }
+
+  const regResult = await getAllRegistrations({ sessionId: sid, attend: true })
+  if (!regResult.success) return regResult
+
+  const memberIds = [
+    ...new Set(
+      regResult.registrations
+        .map((r) => r.memberId)
+        .filter(Boolean)
+        .map(String)
+    ),
+  ]
+
+  let members = []
+  if (memberIds.length) {
+    const oids = memberIds
+      .filter((id) => mongoose.Types.ObjectId.isValid(id))
+      .map((id) => new mongoose.Types.ObjectId(id))
+    const rows = oids.length ? await Member.find({ _id: { $in: oids } }).lean() : []
+    members = rows.map(serializeMemberAttend)
+  }
+
+  return {
+    success: true,
+    registrations: regResult.registrations,
+    members,
+  }
 }
 
 /**
@@ -379,11 +439,12 @@ async function findOrCreateMember(data) {
 
 /**
  * Flatten a Registration + joined member into the shape the frontend expects.
+ * @param {'public'|'attend'|'admin'} scope
  */
-function serialize(r) {
+function serialize(r, scope = 'admin') {
   const m = r.member || {}
   const s = r.session || {}
-  return {
+  const base = {
     id: r.id,
     memberId: r.memberId ? String(r.memberId) : '',
 
@@ -392,19 +453,11 @@ function serialize(r) {
     sessionTime: r.sessionTime,
     sessionTopic: r.sessionTopic,
     branchId: s.branchId || '',
-    branchIds: Array.isArray(m.branchIds) ? m.branchIds.filter(Boolean) : [],
 
     badgeId: m.badgeId || '',
     firstName: m.firstName || '',
     lastName: m.lastName || '',
-    familyRole: m.familyRole || '',
-    age: m.age || '',
-    house: m.house || '',
-    level: m.level || '',
-    school: m.school || '',
-    parent: m.parent || '',
     parentEmail: m.parentEmail || '',
-    phoneNumber: m.phoneNumber || '',
 
     registeredBy: r.registeredBy || '',
     registeredDateAndTime: r.registeredDateAndTime
@@ -415,6 +468,34 @@ function serialize(r) {
     currency: r.currency || 'USD',
     membershipType: r.membershipType || 'none',
     paymentStatus: r.paymentStatus || 'not_required',
+  }
+
+  if (scope === 'public') {
+    return {
+      ...base,
+      paymentCheckoutUrl: r.paymentCheckoutUrl || '',
+    }
+  }
+
+  if (scope === 'attend') {
+    return {
+      ...base,
+      familyRole: m.familyRole || '',
+      phoneNumber: m.phoneNumber || '',
+      branchIds: Array.isArray(m.branchIds) ? m.branchIds.filter(Boolean) : [],
+    }
+  }
+
+  return {
+    ...base,
+    branchIds: Array.isArray(m.branchIds) ? m.branchIds.filter(Boolean) : [],
+    familyRole: m.familyRole || '',
+    age: m.age || '',
+    house: m.house || '',
+    level: m.level || '',
+    school: m.school || '',
+    parent: m.parent || '',
+    phoneNumber: m.phoneNumber || '',
     paymentProvider: r.paymentProvider || '',
     paymentId: r.paymentId || '',
     paymentCheckoutUrl: r.paymentCheckoutUrl || '',

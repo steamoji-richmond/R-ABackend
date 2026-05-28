@@ -110,8 +110,7 @@ export async function lookupByEmail(email) {
 }
 
 /**
- * Returns ONLY the approved members. Pending / rejected sign-ups live in the
- * separate `pendingmembers` collection and surface through `getPendingMembers`.
+ * Returns ONLY the approved members. Admin authentication required.
  */
 export async function getAllValidation() {
   const rows = await Member.find().sort({ createdAt: -1 }).lean()
@@ -120,6 +119,31 @@ export async function getAllValidation() {
     members: rows.map(serializeMember),
   }
 }
+
+/** Look up a single member by badge — attendance staff only. */
+export async function lookupBadge(badge) {
+  const id = String(badge || '').trim()
+  if (!id) return { success: false, error: 'badge is required' }
+  const row = await Member.findOne({ badgeId: id }).lean()
+  return {
+    success: true,
+    member: row ? serializeMemberAttend(row) : null,
+  }
+}
+
+function serializeMemberAttend(m) {
+  return {
+    _id: String(m._id),
+    _rowIndex: String(m._id),
+    badgeId: m.badgeId || '',
+    firstName: m.firstName || '',
+    lastName: m.lastName || '',
+    parentEmail: m.parentEmail || '',
+    membershipType: m.membershipType || 'none',
+  }
+}
+
+export { serializeMemberAttend }
 
 export async function getPendingMembers() {
   const rows = await PendingMember.find({ status: 'pending' })

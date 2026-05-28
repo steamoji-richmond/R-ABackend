@@ -26,20 +26,20 @@ export async function expandVisibleBranchIds(branchIds) {
   return [...out]
 }
 
-export async function getAllBranches({ activeOnly = false } = {}) {
+export async function getAllBranches({ activeOnly = false, admin = false } = {}) {
   const filter = activeOnly ? { active: { $ne: false } } : {}
   const rows = await Branch.find(filter).sort({ name: 1 }).lean()
   return {
     success: true,
-    branches: rows.map(serializeBranch),
+    branches: rows.map((b) => serializeBranch(b, { admin })),
   }
 }
 
-export async function getBranch(id) {
+export async function getBranch(id, { admin = false } = {}) {
   if (!id) return { success: false, error: 'Branch id required' }
   const row = await Branch.findOne({ id: String(id) }).lean()
   if (!row) return { success: false, error: 'Branch not found' }
-  return { success: true, branch: serializeBranch(row) }
+  return { success: true, branch: serializeBranch(row, { admin }) }
 }
 
 export async function saveBranch(data) {
@@ -91,7 +91,7 @@ export async function saveBranch(data) {
   return {
     success: true,
     message: data.id ? 'Branch updated' : 'Branch created',
-    branch: serializeBranch(doc.toObject()),
+    branch: serializeBranch(doc.toObject(), { admin: true }),
   }
 }
 
@@ -149,7 +149,7 @@ export async function setBranchActive(id, active) {
   return {
     success: true,
     message: active ? 'Branch activated' : 'Branch deactivated',
-    branch: serializeBranch(doc.toObject()),
+    branch: serializeBranch(doc.toObject(), { admin: true }),
   }
 }
 
@@ -225,7 +225,7 @@ export async function linkBranches(id, otherIds, action = 'add') {
   return {
     success: true,
     message: 'Branch links updated',
-    branch: serializeBranch(updated),
+    branch: serializeBranch(updated, { admin: true }),
   }
 }
 

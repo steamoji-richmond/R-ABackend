@@ -71,30 +71,39 @@ BranchSchema.method('toClientJSON', function () {
   return serializeBranch(b)
 })
 
-export function serializeBranch(b) {
+export function serializeBranchPublic(b) {
   if (!b) return null
   return {
     id: b.id,
     name: b.name || '',
     code: b.code || '',
-    organizationId: b.organizationId || '',
-    steamojiAuthToken: b.steamojiAuthToken || '',
-    steamojiAuthCookie: b.steamojiAuthCookie || '',
     address: b.address || '',
     city: b.city || '',
     region: b.region || '',
     country: b.country || '',
     phone: b.phone || '',
     email: b.email || '',
+    linkedBranchIds: Array.isArray(b.linkedBranchIds)
+      ? b.linkedBranchIds.filter(Boolean)
+      : [],
+    active: b.active !== false,
+  }
+}
+
+/** Full branch record — admin only (API keys, tokens, passwords). */
+export function serializeBranch(b, { admin = false } = {}) {
+  if (!b) return null
+  if (!admin) return serializeBranchPublic(b)
+  return {
+    ...serializeBranchPublic(b),
+    organizationId: b.organizationId || '',
+    steamojiAuthToken: b.steamojiAuthToken || '',
+    steamojiAuthCookie: b.steamojiAuthCookie || '',
     gmailAppPass: b.gmailAppPass || '',
     squareEnv: b.squareEnv || 'sandbox',
     squareAccessToken: b.squareAccessToken || '',
     squareLocationId: b.squareLocationId || '',
     squareApplicationId: b.squareApplicationId || '',
-    linkedBranchIds: Array.isArray(b.linkedBranchIds)
-      ? b.linkedBranchIds.filter(Boolean)
-      : [],
-    active: b.active !== false,
     createdAt: b.createdAt || null,
     updatedAt: b.updatedAt || null,
   }
