@@ -595,7 +595,7 @@ export async function importFromSteamoji({
 } = {}) {
   if (!organizationID) return { success: false, error: 'organizationID is required' }
 
-  const { resolvedToken, resolvedCookie, cookieBranchId } = await resolveSteamojiCredentials({
+  let { resolvedToken, resolvedCookie, cookieBranchId } = await resolveSteamojiCredentials({
     authToken,
     organizationID,
     branchIds,
