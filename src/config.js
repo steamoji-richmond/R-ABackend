@@ -35,6 +35,15 @@ export const config = {
     redirectUrl:
       process.env.CHECKOUT_REDIRECT_URL || 'http://localhost:3000/payment/return',
   },
+
+  // IANA timezone for session dates/times in emails (GCP server is often UTC)
+  workshopTimezone: process.env.WORKSHOP_TIMEZONE || 'America/Vancouver',
+
+  // Default workshop length for calendar invites (minutes)
+  workshopDurationMinutes: num(process.env.WORKSHOP_DURATION_MINUTES, 60),
+
+  // Domain used in calendar event UIDs (must stay stable for cancel to match)
+  calendarUidDomain: process.env.CALENDAR_UID_DOMAIN || 'steamoji.online',
 }
 
 /** Browser requests with no Origin (curl, server-side) are always allowed. */

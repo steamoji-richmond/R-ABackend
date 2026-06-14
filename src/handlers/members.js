@@ -508,9 +508,83 @@ function findParentMember(familyMembers) {
  * Optional `branchIds` assigns the imported members to specific branches.
  * Optional `onlyUpgraded` restricts the import to upgraded members only.
  */
-/** Returns whether a server-side Steamoji token is configured. */
-export function getSteamojiTokenStatus() {
-  return { success: true, tokenConfigured: !!config.steamoji.authToken }
+/** Returns whether Steamoji credentials are configured (env or branch). */
+export async function getSteamojiTokenStatus({ branchId } = {}) {
+  let tokenConfigured = !!config.steamoji.authToken
+  let cookieConfigured = false
+
+  if (branchId) {
+    const branch = await Branch.findOne({ id: String(branchId) }).lean()
+    if (branch?.steamojiAuthToken?.trim()) tokenConfigured = true
+    if (branch?.steamojiAuthCookie?.trim()) cookieConfigured = true
+  } else {
+    const withToken = await Branch.findOne({
+      steamojiAuthToken: { $nin: ['', null] },
+    })
+      .select('_id')
+      .lean()
+    const withCookie = await Branch.findOne({
+      steamojiAuthCookie: { $nin: ['', null] },
+    })
+      .select('_id')
+      .lean()
+    if (withToken) tokenConfigured = true
+    if (withCookie) cookieConfigured = true
+  }
+
+  return { success: true, tokenConfigured, cookieConfigured }
+}
+
+function normalizeSteamojiToken(raw) {
+  let t = (raw || '').trim()
+  if (t.startsWith('"') && t.endsWith('"')) t = t.slice(1, -1).trim()
+  if (t && !t.startsWith('identoji ')) t = `identoji ${t}`
+  return t
+}
+
+/** Strip accidental `authoji=` prefix when pasted from DevTools. */
+function normalizeSteamojiCookie(raw) {
+  let c = (raw || '').trim()
+  if (c.startsWith('"') && c.endsWith('"')) c = c.slice(1, -1).trim()
+  const fromPair = c.match(/(?:^|;\s*)authoji=([^;]+)/i)
+  if (fromPair) return fromPair[1].trim()
+  if (/^authoji=/i.test(c)) return c.replace(/^authoji=/i, '').trim()
+  return c
+}
+
+async function resolveSteamojiCredentials({ authToken, organizationID, branchIds }) {
+  let resolvedToken = normalizeSteamojiToken(authToken)
+  let resolvedCookie = ''
+  let cookieBranchId = null
+
+  const explicitIds = normalizeBranchIds(branchIds) || []
+
+  // 1) Branch selected in the import modal (most reliable)
+  if (explicitIds.length) {
+    const selectedBranch = await Branch.findOne({ id: explicitIds[0] }).lean()
+    if (selectedBranch) {
+      if (!resolvedToken) resolvedToken = normalizeSteamojiToken(selectedBranch.steamojiAuthToken)
+      if (selectedBranch.steamojiAuthCookie) {
+        resolvedCookie = normalizeSteamojiCookie(selectedBranch.steamojiAuthCookie)
+        cookieBranchId = selectedBranch._id
+      }
+    }
+  }
+
+  // 2) Branch matched by organization ID
+  const matchingBranch = await Branch.findOne({ organizationId: organizationID }).lean()
+  if (matchingBranch) {
+    if (!resolvedToken) resolvedToken = normalizeSteamojiToken(matchingBranch.steamojiAuthToken)
+    if (!resolvedCookie && matchingBranch.steamojiAuthCookie) {
+      resolvedCookie = normalizeSteamojiCookie(matchingBranch.steamojiAuthCookie)
+      cookieBranchId = matchingBranch._id
+    }
+  }
+
+  // 3) Global env fallback (token only — no cookie in env)
+  if (!resolvedToken) resolvedToken = normalizeSteamojiToken(config.steamoji.authToken)
+
+  return { resolvedToken, resolvedCookie, cookieBranchId }
 }
 
 export async function importFromSteamoji({
@@ -521,31 +595,12 @@ export async function importFromSteamoji({
 } = {}) {
   if (!organizationID) return { success: false, error: 'organizationID is required' }
 
-  // Token + cookie priority:
-  //  1. Values passed explicitly from the frontend (manual paste / localStorage)
-  //  2. Values stored on the branch that has this organizationId
-  //  3. Global token fallback from STEAMOJI_AUTH_TOKEN env var (no cookie fallback)
-  const normalizeToken = (t) => {
-    t = (t || '').trim()
-    // Strip surrounding JSON quotes if the value was stored as a JSON string
-    if (t.startsWith('"') && t.endsWith('"')) t = t.slice(1, -1).trim()
-    if (t && !t.startsWith('identoji ')) t = `identoji ${t}`
-    return t
-  }
+  const { resolvedToken, resolvedCookie, cookieBranchId } = await resolveSteamojiCredentials({
+    authToken,
+    organizationID,
+    branchIds,
+  })
 
-  let resolvedToken = normalizeToken(authToken)
-  let resolvedCookie = ''
-  let cookieBranchId = null // branch to update when cookie refreshes
-
-  const matchingBranch = await Branch.findOne({ organizationId: organizationID }).lean()
-  if (!resolvedToken) {
-    resolvedToken = normalizeToken(matchingBranch?.steamojiAuthToken)
-  }
-  if (matchingBranch?.steamojiAuthCookie) {
-    resolvedCookie = matchingBranch.steamojiAuthCookie.trim()
-    cookieBranchId = matchingBranch._id
-  }
-  if (!resolvedToken) resolvedToken = config.steamoji.authToken || ''
   if (!resolvedToken) {
     return {
       success: false,

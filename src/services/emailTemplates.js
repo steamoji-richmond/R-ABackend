@@ -36,6 +36,7 @@ const BRAND = {
  * @param {string} p.branchName      - Branch / location name
  * @param {string} [p.branchAddress] - Branch address (optional)
  * @param {string} [p.registrationId]- Registration reference ID (optional)
+ * @param {string} [p.calendarUrl]   - Google Calendar add-event URL (optional)
  */
 export function registrationConfirmationTemplate(p) {
   const subject = `You're registered! ${p.sessionTopic} on ${p.sessionDate}`
@@ -53,6 +54,10 @@ export function registrationConfirmationTemplate(p) {
     </p>
 
     ${sessionCard(p)}
+
+    ${calendarButton(p.calendarUrl)}
+
+    ${p.calendarInviteAttached ? calendarInviteNote() : ''}
 
     ${p.registrationId ? `
     <p style="margin:16px 0 0;font-size:13px;color:#6B7280">
@@ -77,6 +82,10 @@ export function registrationConfirmationTemplate(p) {
     `  Time:     ${p.sessionTime}`,
     `  Location: ${p.branchName}${p.branchAddress ? ', ' + p.branchAddress : ''}`,
     p.registrationId ? `  Reference: ${p.registrationId}` : '',
+    p.calendarUrl ? `\nAdd to Google Calendar:\n${p.calendarUrl}` : '',
+    p.calendarInviteAttached
+      ? '\nA calendar invite (.ics) is also attached — open it to add the event (recommended so cancellations can remove it automatically).'
+      : '',
     '',
     `If you have any questions, please get in touch.`,
     '',
@@ -117,6 +126,8 @@ export function cancellationConfirmationTemplate(p) {
 
     ${sessionCard(p)}
 
+    ${p.calendarCancelAttached ? calendarCancelNote() : ''}
+
     <p style="margin:24px 0 0">
       If this was a mistake, or you'd like to register again, please visit our
       website or contact us directly.
@@ -137,6 +148,9 @@ export function cancellationConfirmationTemplate(p) {
     `  Date:     ${p.sessionDate}`,
     `  Time:     ${p.sessionTime}`,
     `  Location: ${p.branchName}`,
+    p.calendarCancelAttached
+      ? '\nA calendar cancellation (.ics) is attached — open it to remove the workshop from your calendar if you added it from our invite.'
+      : '',
     '',
     `If this was a mistake, please contact us.`,
     '',
@@ -160,6 +174,7 @@ export function cancellationConfirmationTemplate(p) {
  * @param {string} p.sessionTime     - Human-readable time
  * @param {string} p.branchName      - Branch / location name
  * @param {string} [p.branchAddress] - Branch address (optional)
+ * @param {string} [p.calendarUrl]   - Google Calendar add-event URL (optional)
  */
 export function sessionReminderTemplate(p) {
   const subject = `Reminder: ${p.sessionTopic} is tomorrow at ${p.sessionTime}!`
@@ -177,6 +192,8 @@ export function sessionReminderTemplate(p) {
     </p>
 
     ${sessionCard(p)}
+
+    ${calendarButton(p.calendarUrl)}
 
     <p style="margin:24px 0 8px"><strong>What to bring:</strong></p>
     <ul style="margin:0 0 16px;padding-left:20px;color:#374151">
@@ -201,6 +218,7 @@ export function sessionReminderTemplate(p) {
     `  Date:     ${p.sessionDate}`,
     `  Time:     ${p.sessionTime}`,
     `  Location: ${p.branchName}${p.branchAddress ? ', ' + p.branchAddress : ''}`,
+    p.calendarUrl ? `\nAdd to Google Calendar:\n${p.calendarUrl}` : '',
     '',
     `See you tomorrow!`,
     `The ${BRAND.name} Team`,
@@ -259,6 +277,8 @@ export function sessionDeletedTemplate(p) {
 
     ${reasonBlock}
 
+    ${p.calendarCancelAttached ? calendarCancelNote() : ''}
+
     <p style="margin:24px 0 0">
       We apologise for the inconvenience. If you have any questions, please
       reach out to us and we'll do our best to help.
@@ -280,6 +300,9 @@ export function sessionDeletedTemplate(p) {
     `  Time:     ${p.sessionTime}`,
     `  Location: ${p.branchName}${p.branchAddress ? ', ' + p.branchAddress : ''}`,
     p.reason ? `\nReason: ${p.reason}` : '',
+    p.calendarCancelAttached
+      ? '\nA calendar cancellation (.ics) is attached — open it to remove the workshop from your calendar if you added it from our invite.'
+      : '',
     '',
     `We apologise for the inconvenience. Please contact us if you have any questions.`,
     '',
@@ -372,6 +395,44 @@ function sessionCard(p) {
     </thead>
     <tbody>${rowsHtml}</tbody>
   </table>`
+}
+
+function calendarButton(url) {
+  if (!url) return ''
+  return `
+  <p style="margin:20px 0 0;text-align:center">
+    <a href="${esc(url)}" target="_blank" rel="noopener noreferrer" style="
+      display:inline-block;
+      background:${BRAND.color};
+      color:#ffffff !important;
+      font-size:15px;
+      font-weight:600;
+      text-decoration:none;
+      padding:12px 28px;
+      border-radius:8px;
+    ">📅&nbsp; Add to Google Calendar</a>
+  </p>
+  <p style="margin:8px 0 0;text-align:center;font-size:12px;color:#6B7280">
+    Opens Google Calendar to save this workshop to your schedule
+  </p>`
+}
+
+function calendarInviteNote() {
+  return `
+  <p style="margin:16px 0 0;padding:12px 16px;background:#F0FDF4;border-radius:8px;font-size:13px;color:#166534">
+    <strong>Tip:</strong> A calendar invite is attached to this email.
+    Open <em>workshop.ics</em> to add the event — if the workshop is later cancelled,
+    we'll send a matching cancellation that removes it automatically.
+  </p>`
+}
+
+function calendarCancelNote() {
+  return `
+  <p style="margin:20px 0 0;padding:12px 16px;background:#FEF2F2;border-radius:8px;font-size:13px;color:#991B1B">
+    <strong>Calendar:</strong> If you added this workshop from our calendar invite,
+    open the attached <em>workshop-cancelled.ics</em> file to remove it from your calendar.
+    If you used the Google Calendar button instead, please delete the event manually.
+  </p>`
 }
 
 function layout(previewText, bodyHtml) {

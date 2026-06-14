@@ -107,7 +107,7 @@ export async function confirmPayment(registrationId) {
       : 'NOT FOUND'
     )
     if (member) {
-      sendRegistrationConfirmationEmail(member, session, branch, reg.id).catch((err) => {
+      sendRegistrationConfirmationEmail(member, session, branch, reg.id, reg).catch((err) => {
         console.error(`[payment:confirm] confirmation email failed:`, err.message)
       })
     }

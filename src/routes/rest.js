@@ -79,8 +79,12 @@ router.post('/members', async (req, res, next) => {
     next(e)
   }
 })
-router.get('/members/steamoji-token-status', (_req, res) => {
-  res.json(members.getSteamojiTokenStatus())
+router.get('/members/steamoji-token-status', async (req, res, next) => {
+  try {
+    res.json(await members.getSteamojiTokenStatus({ branchId: req.query.branchId }))
+  } catch (e) {
+    next(e)
+  }
 })
 router.post('/members/import-steamoji', async (req, res, next) => {
   try {

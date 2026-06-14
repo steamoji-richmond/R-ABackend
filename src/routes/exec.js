@@ -124,7 +124,9 @@ async function handle(req, res) {
       case 'steamojiTokenStatus': {
         const denied = requireAdmin(req, body)
         if (denied) { result = denied; break }
-        result = members.getSteamojiTokenStatus()
+        result = await members.getSteamojiTokenStatus({
+          branchId: body.branchId || req.query.branchId || '',
+        })
         break
       }
       case 'importSteamoji': {

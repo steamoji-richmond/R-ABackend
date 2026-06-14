@@ -104,7 +104,7 @@ export async function deleteSession(sessionId, reason) {
     for (const reg of registrations) {
       const member = memberMap.get(String(reg.memberId))
       if (!member?.parentEmail) continue
-      sendSessionDeletedEmail(member, session, branch, reason || '').catch(() => {})
+      sendSessionDeletedEmail(member, session, branch, reason || '', reg.id).catch(() => {})
     }
   }
 

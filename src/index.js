@@ -38,7 +38,7 @@ async function main() {
         }
       },
       methods: ['GET', 'POST', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Accept'],
+      allowedHeaders: ['Content-Type', 'Accept', 'X-Admin-Key', 'X-Attend-Key'],
       maxAge: 86400,
     })
   )

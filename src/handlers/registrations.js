@@ -216,7 +216,7 @@ export async function saveRegistration(data) {
     const branch = session.branchId
       ? await Branch.findOne({ id: session.branchId }).lean()
       : null
-    sendRegistrationConfirmationEmail(member, session, branch, created.id).catch(() => {})
+    sendRegistrationConfirmationEmail(member, session, branch, created.id, created).catch(() => {})
   }
 
   return {
@@ -326,7 +326,7 @@ export async function deleteRegistration(registrationId) {
     const cancelBranch = cancelSession.branchId
       ? await Branch.findOne({ id: cancelSession.branchId }).lean()
       : null
-    sendCancellationConfirmationEmail(cancelMember, cancelSession, cancelBranch).catch(() => {})
+    sendCancellationConfirmationEmail(cancelMember, cancelSession, cancelBranch, regDoc.id).catch(() => {})
   }
 
   return {

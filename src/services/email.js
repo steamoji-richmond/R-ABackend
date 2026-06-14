@@ -19,12 +19,15 @@
  */
 
 import nodemailer from 'nodemailer'
+import { config } from '../config.js'
 import {
   registrationConfirmationTemplate,
   cancellationConfirmationTemplate,
   sessionReminderTemplate,
   sessionDeletedTemplate,
 } from './emailTemplates.js'
+import { buildGoogleCalendarUrl } from './calendarLinks.js'
+import { buildCalendarIcs } from './calendarIcs.js'
 
 function getTransporter(branch) {
   const user = branch?.email?.trim()
@@ -44,7 +47,7 @@ function fromAddress(branch) {
 
 // ─── Internal send helper ─────────────────────────────────────────────────
 
-async function sendEmail({ to, subject, html, text, branch }) {
+async function sendEmail({ to, subject, html, text, branch, attachments = [] }) {
   const transporter = getTransporter(branch)
 
   if (!transporter) {
@@ -65,6 +68,7 @@ async function sendEmail({ to, subject, html, text, branch }) {
       subject,
       html,
       text,
+      attachments,
     })
     console.log(`[email] Sent "${subject}" to ${to} (messageId: ${info.messageId})`)
   } catch (err) {
@@ -74,35 +78,68 @@ async function sendEmail({ to, subject, html, text, branch }) {
 
 // ─── Data helpers ─────────────────────────────────────────────────────────
 
+const TZ = () => config.workshopTimezone || 'America/Vancouver'
+
 function formatDate(dt) {
   const d = dt instanceof Date ? dt : new Date(dt)
   if (isNaN(d)) return String(dt ?? '')
-  return d.toLocaleDateString('en-US', {
+  return d.toLocaleDateString('en-CA', {
     weekday: 'long',
     year: 'numeric',
     month: 'long',
     day: 'numeric',
+    timeZone: TZ(),
   })
 }
 
 function formatTime(dt) {
   const d = dt instanceof Date ? dt : new Date(dt)
   if (isNaN(d)) return String(dt ?? '')
-  return d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit', hour12: true })
+  return d.toLocaleTimeString('en-CA', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+    timeZone: TZ(),
+  })
 }
 
-function buildTemplateData(member, session, branch) {
+/** Prefer human-readable date/time saved on registration (admin local time). */
+function formatStoredSessionTime(sessionTime) {
+  const s = String(sessionTime || '').trim()
+  if (!s) return ''
+  // Already formatted e.g. "10:00 AM" from the registration UI
+  if (/[ap]m/i.test(s) || s.includes(':')) return s
+  return s
+}
+
+function buildTemplateData(member, session, branch, overrides = {}) {
+  const storedTime = formatStoredSessionTime(overrides.sessionTime)
   return {
     parentName:    member.parent || member.firstName + ' ' + member.lastName,
     childName:     member.firstName + ' ' + member.lastName,
     sessionTopic:  session.topic  || 'Workshop',
     sessionDate:   session.dt ? formatDate(session.dt) : '',
-    sessionTime:   session.dt ? formatTime(session.dt) : '',
+    sessionTime:   storedTime || (session.dt ? formatTime(session.dt) : ''),
     branchName:    branch?.name   || 'our venue',
     branchAddress: branch?.address
       ? [branch.address, branch.city].filter(Boolean).join(', ')
       : '',
+    calendarUrl: buildGoogleCalendarUrl(session, member, branch),
   }
+}
+
+function calendarIcsAttachments({ registrationId, session, member, branch, method }) {
+  const ics = buildCalendarIcs({ registrationId, session, member, branch, method })
+  if (!ics) return []
+
+  const isCancel = method === 'CANCEL'
+  return [
+    {
+      filename: isCancel ? 'workshop-cancelled.ics' : 'workshop.ics',
+      content: ics,
+      contentType: `text/calendar; charset=utf-8; method=${isCancel ? 'CANCEL' : 'REQUEST'}`,
+    },
+  ]
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────
@@ -110,21 +147,47 @@ function buildTemplateData(member, session, branch) {
 /**
  * Email #1 — Registration confirmation.
  */
-export async function sendRegistrationConfirmationEmail(member, session, branch, registrationId) {
+export async function sendRegistrationConfirmationEmail(member, session, branch, registrationId, registration) {
   if (!member?.parentEmail) return
-  const data = { ...buildTemplateData(member, session, branch), registrationId }
-  const { subject, html, text } = registrationConfirmationTemplate(data)
-  await sendEmail({ to: member.parentEmail, subject, html, text, branch })
+  const data = {
+    ...buildTemplateData(member, session, branch, {
+      sessionDate: registration?.sessionDate,
+      sessionTime: registration?.sessionTime,
+    }),
+    registrationId,
+  }
+  const { subject, html, text } = registrationConfirmationTemplate({
+    ...data,
+    calendarInviteAttached: Boolean(registrationId),
+  })
+  const attachments = calendarIcsAttachments({
+    registrationId,
+    session,
+    member,
+    branch,
+    method: 'REQUEST',
+  })
+  await sendEmail({ to: member.parentEmail, subject, html, text, branch, attachments })
 }
 
 /**
  * Email #2 — Cancellation confirmation.
  */
-export async function sendCancellationConfirmationEmail(member, session, branch) {
+export async function sendCancellationConfirmationEmail(member, session, branch, registrationId) {
   if (!member?.parentEmail) return
   const data = buildTemplateData(member, session, branch)
-  const { subject, html, text } = cancellationConfirmationTemplate(data)
-  await sendEmail({ to: member.parentEmail, subject, html, text, branch })
+  const attachments = calendarIcsAttachments({
+    registrationId,
+    session,
+    member,
+    branch,
+    method: 'CANCEL',
+  })
+  const { subject, html, text } = cancellationConfirmationTemplate({
+    ...data,
+    calendarCancelAttached: attachments.length > 0,
+  })
+  await sendEmail({ to: member.parentEmail, subject, html, text, branch, attachments })
 }
 
 /**
@@ -141,9 +204,19 @@ export async function sendSessionReminderEmail(member, session, branch) {
  * Email #4 — Session deleted notification.
  * Sent to each registered member when an admin deletes a session.
  */
-export async function sendSessionDeletedEmail(member, session, branch, reason) {
+export async function sendSessionDeletedEmail(member, session, branch, reason, registrationId) {
   if (!member?.parentEmail) return
   const data = { ...buildTemplateData(member, session, branch), reason: reason || '' }
-  const { subject, html, text } = sessionDeletedTemplate(data)
-  await sendEmail({ to: member.parentEmail, subject, html, text, branch })
+  const attachments = calendarIcsAttachments({
+    registrationId,
+    session,
+    member,
+    branch,
+    method: 'CANCEL',
+  })
+  const { subject, html, text } = sessionDeletedTemplate({
+    ...data,
+    calendarCancelAttached: attachments.length > 0,
+  })
+  await sendEmail({ to: member.parentEmail, subject, html, text, branch, attachments })
 }
