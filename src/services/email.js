@@ -26,7 +26,6 @@ import {
   sessionReminderTemplate,
   sessionDeletedTemplate,
 } from './emailTemplates.js'
-import { buildGoogleCalendarUrl } from './calendarLinks.js'
 import { buildCalendarIcs } from './calendarIcs.js'
 
 function getTransporter(branch) {
@@ -47,7 +46,7 @@ function fromAddress(branch) {
 
 // ─── Internal send helper ─────────────────────────────────────────────────
 
-async function sendEmail({ to, subject, html, text, branch, attachments = [] }) {
+async function sendEmail({ to, subject, html, text, branch, icalEvent = null }) {
   const transporter = getTransporter(branch)
 
   if (!transporter) {
@@ -62,14 +61,24 @@ async function sendEmail({ to, subject, html, text, branch, attachments = [] }) 
   }
 
   try {
-    const info = await transporter.sendMail({
+    const mail = {
       from: fromAddress(branch),
       to,
       subject,
       html,
       text,
-      attachments,
-    })
+    }
+    // Inline calendar part — Gmail/Outlook link REQUEST/CANCEL to the same UID.
+    // Do not also attach .ics files (duplicate events + broken cancels).
+    if (icalEvent?.content) {
+      mail.icalEvent = {
+        method: icalEvent.method || 'REQUEST',
+        filename: icalEvent.method === 'CANCEL' ? 'workshop-cancelled.ics' : 'workshop.ics',
+        content: icalEvent.content,
+      }
+    }
+
+    const info = await transporter.sendMail(mail)
     console.log(`[email] Sent "${subject}" to ${to} (messageId: ${info.messageId})`)
   } catch (err) {
     console.error('[email] Failed to send email:', err.message)
@@ -124,22 +133,20 @@ function buildTemplateData(member, session, branch, overrides = {}) {
     branchAddress: branch?.address
       ? [branch.address, branch.city].filter(Boolean).join(', ')
       : '',
-    calendarUrl: buildGoogleCalendarUrl(session, member, branch),
   }
 }
 
-function calendarIcsAttachments({ registrationId, session, member, branch, method }) {
-  const ics = buildCalendarIcs({ registrationId, session, member, branch, method })
-  if (!ics) return []
-
-  const isCancel = method === 'CANCEL'
-  return [
-    {
-      filename: isCancel ? 'workshop-cancelled.ics' : 'workshop.ics',
-      content: ics,
-      contentType: `text/calendar; charset=utf-8; method=${isCancel ? 'CANCEL' : 'REQUEST'}`,
-    },
-  ]
+function buildCalendarIcal({ registrationId, session, member, branch, method, attendeeEmail }) {
+  const content = buildCalendarIcs({
+    registrationId,
+    session,
+    member,
+    branch,
+    method,
+    attendeeEmail,
+  })
+  if (!content) return null
+  return { method, content }
 }
 
 // ─── Public API ───────────────────────────────────────────────────────────
@@ -156,18 +163,16 @@ export async function sendRegistrationConfirmationEmail(member, session, branch,
     }),
     registrationId,
   }
-  const { subject, html, text } = registrationConfirmationTemplate({
-    ...data,
-    calendarInviteAttached: Boolean(registrationId),
-  })
-  const attachments = calendarIcsAttachments({
+  const { subject, html, text } = registrationConfirmationTemplate(data)
+  const icalEvent = buildCalendarIcal({
     registrationId,
     session,
     member,
     branch,
     method: 'REQUEST',
+    attendeeEmail: member.parentEmail,
   })
-  await sendEmail({ to: member.parentEmail, subject, html, text, branch, attachments })
+  await sendEmail({ to: member.parentEmail, subject, html, text, branch, icalEvent })
 }
 
 /**
@@ -176,18 +181,16 @@ export async function sendRegistrationConfirmationEmail(member, session, branch,
 export async function sendCancellationConfirmationEmail(member, session, branch, registrationId) {
   if (!member?.parentEmail) return
   const data = buildTemplateData(member, session, branch)
-  const attachments = calendarIcsAttachments({
+  const icalEvent = buildCalendarIcal({
     registrationId,
     session,
     member,
     branch,
     method: 'CANCEL',
+    attendeeEmail: member.parentEmail,
   })
-  const { subject, html, text } = cancellationConfirmationTemplate({
-    ...data,
-    calendarCancelAttached: attachments.length > 0,
-  })
-  await sendEmail({ to: member.parentEmail, subject, html, text, branch, attachments })
+  const { subject, html, text } = cancellationConfirmationTemplate(data)
+  await sendEmail({ to: member.parentEmail, subject, html, text, branch, icalEvent })
 }
 
 /**
@@ -207,16 +210,14 @@ export async function sendSessionReminderEmail(member, session, branch) {
 export async function sendSessionDeletedEmail(member, session, branch, reason, registrationId) {
   if (!member?.parentEmail) return
   const data = { ...buildTemplateData(member, session, branch), reason: reason || '' }
-  const attachments = calendarIcsAttachments({
+  const icalEvent = buildCalendarIcal({
     registrationId,
     session,
     member,
     branch,
     method: 'CANCEL',
+    attendeeEmail: member.parentEmail,
   })
-  const { subject, html, text } = sessionDeletedTemplate({
-    ...data,
-    calendarCancelAttached: attachments.length > 0,
-  })
-  await sendEmail({ to: member.parentEmail, subject, html, text, branch, attachments })
+  const { subject, html, text } = sessionDeletedTemplate(data)
+  await sendEmail({ to: member.parentEmail, subject, html, text, branch, icalEvent })
 }
