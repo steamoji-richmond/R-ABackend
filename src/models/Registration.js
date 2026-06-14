@@ -45,6 +45,7 @@ const RegistrationSchema = new mongoose.Schema(
     paymentId: { type: String, default: '' },
     paymentCheckoutUrl: { type: String, default: '' },
     paidAt: { type: Date, default: null },
+    confirmationEmailSentAt: { type: Date, default: null },
   },
   { timestamps: true }
 )

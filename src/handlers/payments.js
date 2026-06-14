@@ -10,6 +10,30 @@ async function getBranchForSession(session) {
   return Branch.findOne({ id: session.branchId }).lean()
 }
 
+/** Send confirmation email once per paid registration. Returns true if sent. */
+async function sendPaidRegistrationEmail(reg, session, branch, member) {
+  if (reg.confirmationEmailSentAt) {
+    console.log(`[payment:confirm] confirmation email already sent for ${reg.id}`)
+    return false
+  }
+  if (!member?.parentEmail) {
+    console.warn(`[payment:confirm] no parentEmail for member ${member?._id} — email skipped`)
+    return false
+  }
+  if (!branch?.email?.trim() || !branch?.gmailAppPass?.trim()) {
+    console.warn(
+      `[payment:confirm] branch "${branch?.name || '?'}" missing email/gmailAppPass — email skipped`
+    )
+    return false
+  }
+
+  const regPayload = typeof reg.toObject === 'function' ? reg.toObject() : reg
+  await sendRegistrationConfirmationEmail(member, session, branch, reg.id, regPayload)
+  await Registration.updateOne({ id: reg.id }, { confirmationEmailSentAt: new Date() })
+  console.log(`[payment:confirm] confirmation email sent to ${member.parentEmail}`)
+  return true
+}
+
 export async function createPaymentLink(registrationId) {
   if (!registrationId) return { success: false, error: 'registrationId required' }
   const reg = await Registration.findOne({ id: registrationId })
@@ -65,7 +89,13 @@ export async function confirmPayment(registrationId) {
 
   const reg = await Registration.findOne({ id: registrationId })
   console.log(`[payment:confirm] registration lookup:`, reg
-    ? { id: reg.id, sessionId: reg.sessionId, paymentStatus: reg.paymentStatus, paymentId: reg.paymentId, priceAmount: reg.priceAmount, currency: reg.currency }
+    ? {
+        id: reg.id,
+        sessionId: reg.sessionId,
+        paymentStatus: reg.paymentStatus,
+        paymentId: reg.paymentId,
+        confirmationEmailSentAt: reg.confirmationEmailSentAt,
+      }
     : 'NOT FOUND'
   )
   if (!reg) return { success: false, error: 'Registration not found' }
@@ -75,14 +105,11 @@ export async function confirmPayment(registrationId) {
   }
 
   const session = await Session.findOne({ id: reg.sessionId }).lean()
-  console.log(`[payment:confirm] session:`, session
-    ? { id: session.id, topic: session.topic, branchId: session.branchId }
-    : 'NOT FOUND'
-  )
+  if (!session) return { success: false, error: 'Session not found' }
 
   const branch = await getBranchForSession(session)
   console.log(`[payment:confirm] branch:`, branch
-    ? { id: branch.id, name: branch.name, squareEnv: branch.squareEnv, hasToken: !!branch.squareAccessToken, hasLocation: !!branch.squareLocationId }
+    ? { id: branch.id, name: branch.name, hasEmail: !!branch.email, hasGmailPass: !!branch.gmailAppPass }
     : 'none (no branchId on session)'
   )
 
@@ -90,9 +117,11 @@ export async function confirmPayment(registrationId) {
   const result = await verifyPayment(reg.paymentId, branch)
   console.log(`[payment:confirm] verifyPayment result:`, result)
 
+  let emailSent = false
+
   if (result.paid) {
     reg.paymentStatus = 'paid'
-    reg.paidAt = new Date()
+    if (!reg.paidAt) reg.paidAt = new Date()
     await reg.save()
     console.log(`[payment:confirm] marked as paid, updating session.reg[]`)
 
@@ -106,14 +135,21 @@ export async function confirmPayment(registrationId) {
       ? { name: `${member.firstName} ${member.lastName}`, parentEmail: member.parentEmail }
       : 'NOT FOUND'
     )
-    if (member) {
-      sendRegistrationConfirmationEmail(member, session, branch, reg.id, reg).catch((err) => {
-        console.error(`[payment:confirm] confirmation email failed:`, err.message)
-      })
+
+    try {
+      emailSent = await sendPaidRegistrationEmail(reg, session, branch, member)
+    } catch (err) {
+      console.error(`[payment:confirm] confirmation email failed:`, err.message)
     }
   } else {
     console.log(`[payment:confirm] payment not yet completed — status="${result.status}"`)
   }
 
-  return { success: true, ...result, registrationId: reg.id }
+  return {
+    success: true,
+    ...result,
+    registrationId: reg.id,
+    emailSent,
+    confirmationEmailSentAt: reg.confirmationEmailSentAt || null,
+  }
 }

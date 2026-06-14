@@ -32,7 +32,7 @@ function getTransporter(branch) {
   const user = branch?.email?.trim()
   const pass = branch?.gmailAppPass?.trim().replace(/\s+/g, '') // strip spaces Google adds for display
 
-  console.log(`[email:debug] branch="${branch?.name}" user="${user}" pass="${pass}" pass_len=${pass?.length ?? 0}`)
+  console.log(`[email:debug] branch="${branch?.name}" user="${user}" pass_len=${pass?.length ?? 0}`)
 
   if (!user || !pass) return null
   return nodemailer.createTransport({ service: 'gmail', auth: { user, pass } })
@@ -50,14 +50,12 @@ async function sendEmail({ to, subject, html, text, branch, icalEvent = null }) 
   const transporter = getTransporter(branch)
 
   if (!transporter) {
-    console.warn(
-      `[email] Branch "${branch?.name || '?'}" has no email/gmailAppPass configured — skipped: ${subject}`
+    throw new Error(
+      `Branch "${branch?.name || '?'}" has no email/gmailAppPass configured`
     )
-    return
   }
   if (!to) {
-    console.warn('[email] No recipient address — email skipped:', subject)
-    return
+    throw new Error('No recipient address')
   }
 
   try {
@@ -68,8 +66,6 @@ async function sendEmail({ to, subject, html, text, branch, icalEvent = null }) 
       html,
       text,
     }
-    // Inline calendar part — Gmail/Outlook link REQUEST/CANCEL to the same UID.
-    // Do not also attach .ics files (duplicate events + broken cancels).
     if (icalEvent?.content) {
       mail.icalEvent = {
         method: icalEvent.method || 'REQUEST',
@@ -80,8 +76,27 @@ async function sendEmail({ to, subject, html, text, branch, icalEvent = null }) 
 
     const info = await transporter.sendMail(mail)
     console.log(`[email] Sent "${subject}" to ${to} (messageId: ${info.messageId})`)
+    return true
   } catch (err) {
+    if (icalEvent?.content) {
+      console.warn('[email] Calendar invite failed, retrying without it:', err.message)
+      try {
+        const info = await transporter.sendMail({
+          from: fromAddress(branch),
+          to,
+          subject,
+          html,
+          text,
+        })
+        console.log(`[email] Sent "${subject}" to ${to} without calendar (messageId: ${info.messageId})`)
+        return true
+      } catch (retryErr) {
+        console.error('[email] Failed to send email:', retryErr.message)
+        throw retryErr
+      }
+    }
     console.error('[email] Failed to send email:', err.message)
+    throw err
   }
 }
 
@@ -155,7 +170,11 @@ function buildCalendarIcal({ registrationId, session, member, branch, method, at
  * Email #1 — Registration confirmation.
  */
 export async function sendRegistrationConfirmationEmail(member, session, branch, registrationId, registration) {
-  if (!member?.parentEmail) return
+  const to = member?.parentEmail?.trim()
+  if (!to) {
+    console.warn('[email] Registration confirmation skipped — no parentEmail on member')
+    return false
+  }
   const data = {
     ...buildTemplateData(member, session, branch, {
       sessionDate: registration?.sessionDate,
@@ -170,9 +189,10 @@ export async function sendRegistrationConfirmationEmail(member, session, branch,
     member,
     branch,
     method: 'REQUEST',
-    attendeeEmail: member.parentEmail,
+    attendeeEmail: to,
   })
-  await sendEmail({ to: member.parentEmail, subject, html, text, branch, icalEvent })
+  await sendEmail({ to, subject, html, text, branch, icalEvent })
+  return true
 }
 
 /**

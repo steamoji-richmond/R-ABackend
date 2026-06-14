@@ -216,7 +216,12 @@ export async function saveRegistration(data) {
     const branch = session.branchId
       ? await Branch.findOne({ id: session.branchId }).lean()
       : null
-    sendRegistrationConfirmationEmail(member, session, branch, created.id, created).catch(() => {})
+    try {
+      await sendRegistrationConfirmationEmail(member, session, branch, created.id, created)
+      await Registration.updateOne({ id: created.id }, { confirmationEmailSentAt: new Date() })
+    } catch (err) {
+      console.error('[register] confirmation email failed:', err.message)
+    }
   }
 
   return {
