@@ -225,6 +225,11 @@ async function handle(req, res) {
             body.activeOnly === 'true' ||
             req.query.activeOnly === '1' ||
             req.query.activeOnly === 'true',
+          signup:
+            body.signup === true ||
+            body.signup === 'true' ||
+            req.query.signup === '1' ||
+            req.query.signup === 'true',
           admin,
         })
         break
@@ -265,7 +270,14 @@ async function handle(req, res) {
 
       case 'createPaymentLink':
         result = await pay.createPaymentLink(
-          body.registrationId || req.query.registrationId
+          body.registrationId || req.query.registrationId,
+          {
+            sendPaymentEmail:
+              body.sendPaymentEmail === true ||
+              body.sendPaymentEmail === 'true' ||
+              req.query.sendPaymentEmail === '1' ||
+              req.query.sendPaymentEmail === 'true',
+          }
         )
         break
       case 'confirmPayment':

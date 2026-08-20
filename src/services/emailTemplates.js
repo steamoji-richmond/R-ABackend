@@ -292,6 +292,209 @@ export function sessionDeletedTemplate(p) {
   return { subject, html, text }
 }
 
+// ─── 5. Payment pending (complete your payment) ────────────
+
+/**
+ * Sent when a registration is saved but payment has not been completed.
+ * Includes a link to the Square checkout page.
+ */
+export function paymentPendingTemplate(p) {
+  const amountLabel = p.priceLabel || formatMoney(p.priceAmount, p.currency)
+  const subject = `Action required: Complete payment for ${p.sessionTopic}`
+
+  const html = layout(
+    subject,
+    `
+    ${badge('Payment Required', '#D97706')}
+
+    <p style="margin:0 0 16px">Hi ${esc(p.parentName)},</p>
+
+    <p style="margin:0 0 16px">
+      <strong>${esc(p.childName)}</strong> has been registered for the workshop below,
+      but <strong>payment is still required</strong> to confirm their spot.
+      Your registration is not complete until payment is received.
+    </p>
+
+    ${sessionCard(p)}
+
+    ${gstInvoiceRows(p, 'Total due')}
+
+    ${p.checkoutUrl ? ctaButton('Complete Payment', p.checkoutUrl) : ''}
+
+    ${p.checkoutUrl ? `
+    <p style="margin:24px 0 0;font-size:14px;color:#6B7280">
+      If you have already paid, you can ignore this email — confirmation may take a few minutes.
+      If the button above does not work, copy and paste this link into your browser:<br>
+      <a href="${esc(p.checkoutUrl)}" style="color:${BRAND.color};word-break:break-all">${esc(p.checkoutUrl)}</a>
+    </p>` : ''}
+
+    <p style="margin:24px 0 0">Thank you!<br>The ${esc(BRAND.name)} Team</p>
+    `
+  )
+
+  const text = [
+    `Hi ${p.parentName},`,
+    '',
+    `${p.childName} has been registered for ${p.sessionTopic}, but payment is still required.`,
+    '',
+    `  Workshop: ${p.sessionTopic}`,
+    `  Date:     ${p.sessionDate}`,
+    `  Time:     ${p.sessionTime}`,
+    `  Location: ${p.branchName}${p.branchAddress ? ', ' + p.branchAddress : ''}`,
+    Number(p.taxAmount) > 0
+      ? `  Subtotal: ${p.subtotalLabel || formatMoney(p.priceAmount, p.currency)}`
+      : '',
+    Number(p.taxAmount) > 0 ? `  GST (5%): ${p.taxLabel || formatMoney(p.taxAmount, p.currency)}` : '',
+    `  Total due: ${amountLabel}`,
+    '',
+    p.checkoutUrl ? `Complete payment here: ${p.checkoutUrl}` : '',
+    '',
+    `Thank you!`,
+    `The ${BRAND.name} Team`,
+  ].filter(Boolean).join('\n')
+
+  return { subject, html, text }
+}
+
+// ─── 6. Payment receipt (paid confirmation) ────────────────
+
+/**
+ * Sent after Square confirms payment. Includes amount paid and registration details.
+ */
+export function paymentReceiptTemplate(p) {
+  const amountLabel = p.priceLabel || formatMoney(p.priceAmount, p.currency)
+  const subject = `Payment received — ${p.sessionTopic} on ${p.sessionDate}`
+
+  const html = layout(
+    subject,
+    `
+    ${badge('Payment Received', '#059669')}
+
+    <p style="margin:0 0 16px">Hi ${esc(p.parentName)},</p>
+
+    <p style="margin:0 0 16px">
+      Thank you! We've received your payment and
+      <strong>${esc(p.childName)}</strong>'s registration is now confirmed.
+    </p>
+
+    ${sessionCard(p)}
+
+    ${gstInvoiceRows(p, 'Total paid')}
+
+    ${p.registrationId ? `
+    <p style="margin:16px 0 0;font-size:13px;color:#6B7280">
+      Reference&nbsp;ID: <code style="background:#F3F4F6;padding:2px 6px;border-radius:4px">${esc(p.registrationId)}</code>
+    </p>` : ''}
+
+    <p style="margin:24px 0 0">
+      We look forward to seeing ${esc(p.childName)} at the workshop!
+      If you have any questions, please contact us.
+    </p>
+
+    <p style="margin:24px 0 0">See you there!<br>The ${esc(BRAND.name)} Team</p>
+    `
+  )
+
+  const text = [
+    `Hi ${p.parentName},`,
+    '',
+    `Payment received — ${p.childName}'s registration is confirmed:`,
+    `  Workshop: ${p.sessionTopic}`,
+    `  Date:     ${p.sessionDate}`,
+    `  Time:     ${p.sessionTime}`,
+    `  Location: ${p.branchName}${p.branchAddress ? ', ' + p.branchAddress : ''}`,
+    Number(p.taxAmount) > 0
+      ? `  Subtotal: ${p.subtotalLabel || formatMoney(p.priceAmount, p.currency)}`
+      : '',
+    Number(p.taxAmount) > 0 ? `  GST (5%): ${p.taxLabel || formatMoney(p.taxAmount, p.currency)}` : '',
+    `  Total paid: ${amountLabel}`,
+    p.registrationId ? `  Reference: ${p.registrationId}` : '',
+    '',
+    `See you there!`,
+    `The ${BRAND.name} Team`,
+  ].filter((l) => l !== undefined).join('\n')
+
+  return { subject, html, text }
+}
+
+// ─── 7. Admin payment notification (internal) ────────────────
+
+const ADMIN_EVENT_META = {
+  payment_received: { label: 'Payment Completed', color: '#059669', badge: 'Payment Received' },
+  payment_abandoned: { label: 'Payment Abandoned', color: '#D97706', badge: 'Payment Not Completed' },
+  payment_reminder: { label: 'Payment Reminder Sent', color: '#2563EB', badge: 'Reminder Sent' },
+}
+
+/**
+ * Internal notice to branch admins when a payment-related email is sent or payment completes.
+ */
+export function adminPaymentNotificationTemplate(p) {
+  const meta = ADMIN_EVENT_META[p.eventType] || ADMIN_EVENT_META.payment_abandoned
+  const amountLabel = p.priceLabel || (p.priceAmount != null ? formatMoney(p.priceAmount, p.currency) : '')
+  const subject = `[Admin] ${meta.label} — ${p.childName} / ${p.sessionTopic}`
+
+  const reminderLine = p.daysBefore
+    ? `<p style="margin:0 0 16px"><strong>${esc(String(p.daysBefore))} days</strong> before the workshop — a payment reminder was emailed to the parent.</p>`
+    : ''
+
+  const html = layout(
+    subject,
+    `
+    ${badge(meta.badge, meta.color)}
+
+    <p style="margin:0 0 16px">${esc(meta.label)}</p>
+
+    ${reminderLine}
+
+    <table width="100%" cellpadding="0" cellspacing="0" style="border:1px solid #E5E7EB;border-radius:8px;margin:0 0 16px">
+      <tbody>
+        ${adminRow('Child', p.childName)}
+        ${adminRow('Parent', p.parentName)}
+        ${adminRow('Parent email', p.parentEmail)}
+        ${adminRow('Workshop', p.sessionTopic)}
+        ${adminRow('Date', p.sessionDate)}
+        ${adminRow('Time', p.sessionTime)}
+        ${Number(p.taxAmount) > 0 ? adminRow('Subtotal', p.subtotalLabel || formatMoney(p.priceAmount, p.currency)) : ''}
+        ${Number(p.taxAmount) > 0 ? adminRow('GST (5%)', p.taxLabel || formatMoney(p.taxAmount, p.currency)) : ''}
+        ${amountLabel ? adminRow(p.eventType === 'payment_received' ? 'Total paid' : 'Total due', amountLabel) : ''}
+        ${p.registrationId ? adminRow('Registration ID', p.registrationId) : ''}
+        ${p.branchName ? adminRow('Branch', p.branchName) : ''}
+      </tbody>
+    </table>
+
+    <p style="margin:0;font-size:14px;color:#6B7280">
+      This is an automated admin notification from ${esc(BRAND.name)}.
+    </p>
+    `
+  )
+
+  const text = [
+    `[Admin] ${meta.label}`,
+    p.daysBefore ? `${p.daysBefore} days before workshop — reminder sent to parent.` : '',
+    '',
+    `Child:          ${p.childName}`,
+    `Parent:         ${p.parentName}`,
+    `Parent email:   ${p.parentEmail}`,
+    `Workshop:       ${p.sessionTopic}`,
+    `Date:           ${p.sessionDate}`,
+    `Time:           ${p.sessionTime}`,
+    amountLabel ? `${p.eventType === 'payment_received' ? 'Amount paid' : 'Amount due'}: ${amountLabel}` : '',
+    p.registrationId ? `Registration ID: ${p.registrationId}` : '',
+    p.branchName ? `Branch: ${p.branchName}` : '',
+  ].filter(Boolean).join('\n')
+
+  return { subject, html, text }
+}
+
+function adminRow(label, value) {
+  return `
+    <tr>
+      <td style="padding:10px 16px;font-size:13px;font-weight:600;color:#6B7280;white-space:nowrap;vertical-align:top;width:130px">${esc(label)}</td>
+      <td style="padding:10px 16px 10px 0;font-size:15px;color:#111827;vertical-align:top">${esc(value)}</td>
+    </tr>
+    <tr><td colspan="2" style="padding:0"><hr style="margin:0;border:none;border-top:1px solid #F3F4F6"></td></tr>`
+}
+
 // ────────────────────────────────────────────────────────────
 //  Shared HTML helpers  (edit here to rebrand all emails)
 // ────────────────────────────────────────────────────────────
@@ -302,6 +505,66 @@ function esc(str) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
+}
+
+function formatMoney(amount, currency = 'CAD') {
+  const n = Number(amount)
+  if (!Number.isFinite(n)) return String(amount ?? '')
+  try {
+    return new Intl.NumberFormat('en-CA', { style: 'currency', currency: currency || 'CAD' }).format(n)
+  } catch {
+    return `$${n.toFixed(2)}`
+  }
+}
+
+function paymentSummaryRow(label, value) {
+  return `
+  <table width="100%" cellpadding="0" cellspacing="0" style="margin:16px 0 8px">
+    <tr>
+      <td style="
+        padding:14px 16px;
+        background:#F9FAFB;
+        border:1px solid #E5E7EB;
+        border-radius:8px;
+      ">
+        <table width="100%" cellpadding="0" cellspacing="0">
+          <tr>
+            <td style="font-size:14px;font-weight:600;color:#374151">${esc(label)}</td>
+            <td align="right" style="font-size:20px;font-weight:800;color:${BRAND.color}">${esc(value)}</td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>`
+}
+
+function gstInvoiceRows(p, totalLabel = 'Total') {
+  const tax = Number(p.taxAmount || 0)
+  if (tax <= 0) {
+    return paymentSummaryRow(totalLabel, p.priceLabel || formatMoney(p.priceAmount, p.currency))
+  }
+  return `
+    ${paymentSummaryRow('Subtotal', p.subtotalLabel || formatMoney(p.priceAmount, p.currency))}
+    ${paymentSummaryRow('GST (5%)', p.taxLabel || formatMoney(tax, p.currency))}
+    ${paymentSummaryRow(totalLabel, p.priceLabel || formatMoney(p.totalAmount, p.currency))}
+  `
+}
+
+function ctaButton(label, url) {
+  if (!url) return ''
+  return `
+  <p style="margin:24px 0 0;text-align:center">
+    <a href="${esc(url)}" style="
+      display:inline-block;
+      background:${BRAND.color};
+      color:#FFFFFF;
+      font-size:16px;
+      font-weight:700;
+      text-decoration:none;
+      padding:14px 28px;
+      border-radius:8px;
+    ">${esc(label)}</a>
+  </p>`
 }
 
 function badge(label, color) {

@@ -2,9 +2,9 @@
  * Compute the price a given member must pay for a session.
  *
  * Rules:
- *  - Yearly members         → FREE (no payment required)
- *  - Semi-yearly members    → 50% of session.price
- *  - No membership / expired → 100% of session.price
+ *  - Annual members          → FREE (no payment required)
+ *  - Non-annual members      → 40% off session.price (pay 60%)
+ *  - Non-Steamoji / no membership → 100% of session.price
  *  - If session.price <= 0  → FREE for everyone
  */
 export function computePrice(session, member) {
@@ -31,18 +31,18 @@ export function computePrice(session, member) {
       membershipType: 'yearly',
       status: 'not_required',
       isFree: true,
-      note: 'Free for yearly members',
+      note: 'Free for annual members',
     }
   }
 
   if (type === 'semi-yearly') {
     return {
-      amount: round2(basePrice / 2),
+      amount: round2(basePrice * 0.6),
       currency,
       membershipType: 'semi-yearly',
       status: 'pending',
       isFree: false,
-      note: '50% discount for semi-yearly members',
+      note: '40% discount for non-annual members',
     }
   }
 
@@ -52,7 +52,7 @@ export function computePrice(session, member) {
     membershipType: 'none',
     status: 'pending',
     isFree: false,
-    note: 'Full price (non-member)',
+    note: 'Full price (non-Steamoji member)',
   }
 }
 

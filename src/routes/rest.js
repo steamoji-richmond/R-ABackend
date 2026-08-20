@@ -11,7 +11,8 @@ const router = express.Router()
 router.get('/branches', async (req, res, next) => {
   try {
     const activeOnly = req.query.activeOnly === '1' || req.query.activeOnly === 'true'
-    res.json(await branches.getAllBranches({ activeOnly }))
+    const signup = req.query.signup === '1' || req.query.signup === 'true'
+    res.json(await branches.getAllBranches({ activeOnly, signup }))
   } catch (e) {
     next(e)
   }
@@ -212,7 +213,9 @@ router.delete('/registrations/:id', async (req, res, next) => {
 // Payments
 router.post('/payments/:registrationId/checkout', async (req, res, next) => {
   try {
-    res.json(await pay.createPaymentLink(req.params.registrationId))
+    const sendPaymentEmail =
+      req.body?.sendPaymentEmail === true || req.body?.sendPaymentEmail === 'true'
+    res.json(await pay.createPaymentLink(req.params.registrationId, { sendPaymentEmail }))
   } catch (e) {
     next(e)
   }

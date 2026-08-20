@@ -5,6 +5,7 @@ import Session from '../models/Session.js'
 import Member from '../models/Member.js'
 import { importFromSteamoji } from '../handlers/members.js'
 import { sendSessionReminderEmail } from './email.js'
+import { sendUnpaidPaymentReminders, sendAbandonedPaymentEmails } from '../handlers/payments.js'
 
 /**
  * Runs at midnight every day.
@@ -81,16 +82,38 @@ async function runSteamojiImport() {
 
 /**
  * Runs at 10:00 AM every day.
- * Finds every session happening tomorrow, then for each registered member
- * sends a reminder email to the parent.
+ * - Day-before session reminders for confirmed registrations
+ * - Unpaid payment reminders at 3 and 2 days before the workshop
+ */
+async function runMorningReminders() {
+  console.log('[cron] Starting morning reminder jobs…')
+  await runDayBeforeReminders()
+  try {
+    await sendUnpaidPaymentReminders()
+  } catch (err) {
+    console.error('[cron] Unpaid payment reminder job failed:', err.message)
+  }
+}
+
+/**
+ * Every 15 minutes: email parents who registered but did not complete payment
+ * (~45 min after registration, still pending).
+ */
+async function runAbandonedPaymentEmails() {
+  try {
+    await sendAbandonedPaymentEmails()
+  } catch (err) {
+    console.error('[cron] Abandoned payment email job failed:', err.message)
+  }
+}
+
+/**
+ * Day-before session reminders for confirmed (paid/free) registrations.
  */
 async function runDayBeforeReminders() {
   console.log('[cron] Starting day-before session reminders…')
 
-  // Build a window that covers all of "tomorrow" in Vancouver time
   const now = new Date()
-  // Tomorrow midnight in UTC, adjusted for America/Vancouver (UTC-7 / UTC-8)
-  // We use a ±1 day window around tomorrow to be timezone-safe
   const tomorrowStart = new Date(now)
   tomorrowStart.setDate(tomorrowStart.getDate() + 1)
   tomorrowStart.setHours(0, 0, 0, 0)
@@ -110,13 +133,12 @@ async function runDayBeforeReminders() {
   }
 
   if (!sessions.length) {
-    console.log('[cron] No sessions tomorrow — skipping reminders.')
+    console.log('[cron] No sessions tomorrow — skipping day-before reminders.')
     return
   }
 
   console.log(`[cron] Found ${sessions.length} session(s) tomorrow. Sending reminders…`)
 
-  // Cache branches to avoid repeated DB calls for the same branchId
   const branchCache = new Map()
   async function getBranch(branchId) {
     if (!branchId) return null
@@ -135,13 +157,11 @@ async function runDayBeforeReminders() {
 
     const branch = await getBranch(session.branchId)
 
-    // Load all registrations for this session in one query
     const registrations = await Registration.find({
       sessionId: session.id,
       id: { $in: registrationIds },
     }).lean()
 
-    // Collect unique memberIds
     const memberIds = [...new Set(registrations.map((r) => r.memberId).filter(Boolean))]
     const members = await Member.find({ _id: { $in: memberIds } }).lean()
     const memberMap = new Map(members.map((m) => [String(m._id), m]))
@@ -160,7 +180,7 @@ async function runDayBeforeReminders() {
     }
   }
 
-  console.log(`[cron] Reminder run done — sent: ${sent}, skipped/no-email: ${skipped}`)
+  console.log(`[cron] Day-before reminder run done — sent: ${sent}, skipped/no-email: ${skipped}`)
 }
 
 export function startCronJobs() {
@@ -171,14 +191,22 @@ export function startCronJobs() {
     )
   }, { timezone: 'America/Vancouver' })
 
-  // 10 AM: day-before session reminders
+  // 10 AM: day-before session reminders + 3/2-day unpaid payment reminders
   schedule('0 10 * * *', () => {
-    runDayBeforeReminders().catch((err) =>
-      console.error('[cron] Unhandled error in runDayBeforeReminders:', err)
+    runMorningReminders().catch((err) =>
+      console.error('[cron] Unhandled error in runMorningReminders:', err)
+    )
+  }, { timezone: 'America/Vancouver' })
+
+  // Every 15 min: abandoned checkout emails (~45 min after registration)
+  schedule('*/15 * * * *', () => {
+    runAbandonedPaymentEmails().catch((err) =>
+      console.error('[cron] Unhandled error in runAbandonedPaymentEmails:', err)
     )
   }, { timezone: 'America/Vancouver' })
 
   console.log('[cron] Jobs scheduled (America/Vancouver):')
   console.log('[cron]   00:00 — Steamoji member import')
-  console.log('[cron]   10:00 — Day-before session reminders')
+  console.log('[cron]   10:00 — Day-before session reminders + unpaid payment reminders (3 & 2 days before)')
+  console.log('[cron]   */15  — Abandoned payment emails (~45 min after registration)')
 }

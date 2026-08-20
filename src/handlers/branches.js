@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid'
-import Branch, { serializeBranch } from '../models/Branch.js'
+import Branch, { serializeBranch, serializeBranchSignup } from '../models/Branch.js'
 import Member from '../models/Member.js'
 import PendingMember from '../models/PendingMember.js'
 import Session from '../models/Session.js'
@@ -26,12 +26,20 @@ export async function expandVisibleBranchIds(branchIds) {
   return [...out]
 }
 
-export async function getAllBranches({ activeOnly = false, admin = false } = {}) {
-  const filter = activeOnly ? { active: { $ne: false } } : {}
+export async function getAllBranches({ activeOnly = false, admin = false, signup = false } = {}) {
+  let filter = {}
+  if (signup) {
+    filter = { active: { $ne: false }, showInSignup: { $ne: false } }
+  } else if (activeOnly) {
+    filter = { active: { $ne: false } }
+  }
   const rows = await Branch.find(filter).sort({ name: 1 }).lean()
+  const mapper = signup
+    ? serializeBranchSignup
+    : (b) => serializeBranch(b, { admin })
   return {
     success: true,
-    branches: rows.map((b) => serializeBranch(b, { admin })),
+    branches: rows.map(mapper),
   }
 }
 
@@ -80,6 +88,7 @@ export async function saveBranch(data) {
     squareLocationId: str(data.squareLocationId),
     squareApplicationId: str(data.squareApplicationId),
     active: data.active === undefined ? undefined : !!data.active,
+    showInSignup: data.showInSignup === undefined ? undefined : !!data.showInSignup,
   }
   Object.keys(payload).forEach((k) => payload[k] === undefined && delete payload[k])
 

@@ -8,7 +8,7 @@ and also exposes a clean REST API under `/api`.
 - **Express 4** with `helmet`, `compression`, `morgan`, `cors`, `express-rate-limit`
 - **MongoDB / Mongoose** with connection pooling (`MONGODB_MAX_POOL=50`) and indexes
 - **Cluster mode** (`npm run cluster`) to use all CPU cores
-- **Pricing engine**: yearly members FREE, semi-yearly 50% off, others pay full
+- **Pricing engine**: Annual Membership: free • Non Annual Membership: 40% off • Non-Steamoji members: Pays full price
 - **Square payments** (stubbed — returns a mock checkout URL until creds are set)
 - **GAS-compatible** `/exec?action=…` endpoints so the existing frontend keeps working
 - **Seed script** with realistic example data
@@ -155,7 +155,7 @@ Raw document in MongoDB:
   "sessionTopic": "Public Speaking — Intro",
   "registeredBy": "admin",
   "registeredDateAndTime": "2026-04-17T14:03:00Z",
-  "priceAmount": 10,                // 50% off because the member is semi-yearly
+  "priceAmount": 12,                // 40% off because the member is non-annual
   "currency": "USD",
   "membershipType": "semi-yearly",  // snapshot at time of registration
   "paymentStatus": "pending",       // not_required | pending | paid | failed | refunded
@@ -197,12 +197,13 @@ from being registered twice for the same session.
 | Session price | Member type   | Amount due  |
 |---------------|---------------|-------------|
 | 0             | anyone        | **FREE**    |
-| > 0           | yearly        | **FREE**    |
-| > 0           | semi-yearly   | price × 0.5 |
-| > 0           | none          | price       |
+| > 0           | yearly (annual) | **FREE**    |
+| > 0           | semi-yearly (non-annual) | price × 0.6 (40% off) |
+| > 0           | none (non-Steamoji) | price       |
 
-The backend computes this on every `POST /register` and stores `priceAmount`,
-`membershipType`, and `paymentStatus` on the registration row.
+All paid amounts are **before GST**. Square checkout adds **5% GST** on top and shows subtotal + GST on the invoice.
+
+The backend computes pricing on every `POST /register` and stores `priceAmount` (subtotal), `taxAmount` (GST), `totalAmount`, `membershipType`, and `paymentStatus` on the registration row.
 
 ## Square integration
 
@@ -227,6 +228,23 @@ The backend computes this on every `POST /register` and stores `priceAmount`,
 
 Without creds, `createCheckout` returns a `mock_*` payment id and a mock
 redirect URL, so you can test the end-to-end flow locally.
+
+## Payment emails
+
+Per-branch Gmail (see Admin → Branches):
+
+| When | Parent email | Admin email |
+|------|--------------|-------------|
+| Register + redirect to Square (same session) | **None** — they are already paying | **None** |
+| ~45 min later, still unpaid (cron every 15 min) | **Payment required** + link | **Payment abandoned** notice |
+| Parent clicks **Pay now** again (return visit) | **Payment required** + link (once) | **None** |
+| 3 or 2 days before workshop, still unpaid (10 AM cron) | **Payment reminder** + link | **Reminder sent** notice |
+| Square confirms payment | **Payment received** receipt | **Payment completed** notice |
+| Free / annual registration | **Registration confirmed** | **None** |
+
+Optional env: `ABANDONED_PAYMENT_DELAY_MS=2700000` (default 45 minutes).
+
+Parent emails go to **parentEmail**. Admin notifications go to the branch **email** address.
 
 ## Tuning for load
 

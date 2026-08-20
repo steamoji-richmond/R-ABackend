@@ -7,6 +7,7 @@ import PendingMember from '../models/PendingMember.js'
 import Branch from '../models/Branch.js'
 import { serializeMemberAttend } from './members.js'
 import { computePrice } from '../services/pricing.js'
+import { computeGstBreakdown } from '../services/tax.js'
 import { expandVisibleBranchIds } from './branches.js'
 import {
   sendRegistrationConfirmationEmail,
@@ -187,6 +188,7 @@ export async function saveRegistration(data) {
   }
 
   const pricing = computePrice(session, member)
+  const tax = computeGstBreakdown(pricing.amount)
   const id = data.id || 'REG' + Date.now().toString(36) + nanoid(6).toUpperCase()
 
   const created = await Registration.create({
@@ -200,7 +202,9 @@ export async function saveRegistration(data) {
     registeredDateAndTime: data.registeredDateAndTime
       ? new Date(data.registeredDateAndTime)
       : new Date(),
-    priceAmount: pricing.amount,
+    priceAmount: tax.subtotal,
+    taxAmount: tax.gstAmount,
+    totalAmount: tax.total,
     currency: pricing.currency,
     membershipType: pricing.membershipType,
     paymentStatus: pricing.status,
@@ -230,6 +234,8 @@ export async function saveRegistration(data) {
     id: created.id,
     memberId: String(member._id),
     priceAmount: created.priceAmount,
+    taxAmount: created.taxAmount,
+    totalAmount: created.totalAmount,
     currency: created.currency,
     membershipType: created.membershipType,
     paymentStatus: created.paymentStatus,
@@ -470,7 +476,9 @@ function serialize(r, scope = 'admin') {
       : '',
 
     priceAmount: Number(r.priceAmount || 0),
-    currency: r.currency || 'USD',
+    taxAmount: Number(r.taxAmount || 0),
+    totalAmount: Number(r.totalAmount ?? r.priceAmount ?? 0),
+    currency: r.currency || 'CAD',
     membershipType: r.membershipType || 'none',
     paymentStatus: r.paymentStatus || 'not_required',
   }

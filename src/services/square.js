@@ -128,8 +128,8 @@ async function orderIsPaid(order, creds) {
  */
 export async function createCheckout({ registration, session, branch }) {
   const creds = getSquareCreds(branch)
-  const amountCents = Math.round(Number(registration.priceAmount || 0) * 100)
-  const currency = (registration.currency || 'USD').toUpperCase()
+  const subtotalCents = Math.round(Number(registration.priceAmount || 0) * 100)
+  const currency = (registration.currency || 'CAD').toUpperCase()
   const orderName = `Workshop: ${session.topic} (${new Date(session.dt).toDateString()})`
   const redirectUrl = config.square.redirectUrl
 
@@ -145,13 +145,30 @@ export async function createCheckout({ registration, session, branch }) {
     }
   }
 
+  if (subtotalCents <= 0) {
+    throw new Error('Cannot create checkout for zero-amount registration')
+  }
+
   const idemKey = nanoid()
   const body = {
     idempotency_key: idemKey,
-    quick_pay: {
-      name: orderName,
-      price_money: { amount: amountCents, currency },
+    order: {
       location_id: creds.locationId,
+      line_items: [
+        {
+          name: orderName,
+          quantity: '1',
+          base_price_money: { amount: subtotalCents, currency },
+        },
+      ],
+      taxes: [
+        {
+          uid: 'gst-5-percent',
+          name: 'GST',
+          percentage: '5',
+          scope: 'ORDER',
+        },
+      ],
     },
     checkout_options: {
       redirect_url: `${redirectUrl}?reg=${encodeURIComponent(registration.id)}`,

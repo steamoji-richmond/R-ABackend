@@ -25,8 +25,12 @@ import {
   cancellationConfirmationTemplate,
   sessionReminderTemplate,
   sessionDeletedTemplate,
+  paymentPendingTemplate,
+  paymentReceiptTemplate,
+  adminPaymentNotificationTemplate,
 } from './emailTemplates.js'
 import { buildCalendarIcs } from './calendarIcs.js'
+import { computeGstBreakdown } from './tax.js'
 
 function getTransporter(branch) {
   const user = branch?.email?.trim()
@@ -151,6 +155,46 @@ function buildTemplateData(member, session, branch, overrides = {}) {
   }
 }
 
+function buildPaymentTemplateData(member, session, branch, registration, overrides = {}) {
+  const base = buildTemplateData(member, session, branch, {
+    sessionDate: registration?.sessionDate,
+    sessionTime: registration?.sessionTime,
+    ...overrides,
+  })
+  const amount = Number(registration?.priceAmount ?? overrides.priceAmount ?? 0)
+  const currency = registration?.currency || overrides.currency || 'CAD'
+  let taxAmount = Number(registration?.taxAmount ?? overrides.taxAmount ?? 0)
+  let totalAmount = Number(registration?.totalAmount ?? overrides.totalAmount ?? 0)
+  if (amount > 0 && taxAmount <= 0 && totalAmount <= amount) {
+    const tax = computeGstBreakdown(amount)
+    taxAmount = tax.gstAmount
+    totalAmount = tax.total
+  }
+  if (totalAmount <= 0 && amount > 0) totalAmount = amount + taxAmount
+  return {
+    ...base,
+    registrationId: registration?.id || overrides.registrationId || '',
+    priceAmount: amount,
+    taxAmount,
+    totalAmount,
+    currency,
+    priceLabel: formatMoneyLabel(totalAmount, currency),
+    subtotalLabel: formatMoneyLabel(amount, currency),
+    taxLabel: formatMoneyLabel(taxAmount, currency),
+    checkoutUrl: overrides.checkoutUrl || registration?.paymentCheckoutUrl || '',
+  }
+}
+
+function formatMoneyLabel(amount, currency = 'CAD') {
+  const n = Number(amount)
+  if (!Number.isFinite(n)) return String(amount ?? '')
+  try {
+    return new Intl.NumberFormat('en-CA', { style: 'currency', currency: currency || 'CAD' }).format(n)
+  } catch {
+    return `$${n.toFixed(2)}`
+  }
+}
+
 function buildCalendarIcal({ registrationId, session, member, branch, method, attendeeEmail }) {
   const content = buildCalendarIcs({
     registrationId,
@@ -221,6 +265,82 @@ export async function sendSessionReminderEmail(member, session, branch) {
   const data = buildTemplateData(member, session, branch)
   const { subject, html, text } = sessionReminderTemplate(data)
   await sendEmail({ to: member.parentEmail, subject, html, text, branch })
+}
+
+/**
+ * Email #5 — Payment pending reminder.
+ * Sent when checkout is created or via cron for unpaid registrations.
+ */
+export async function sendPaymentPendingEmail(member, session, branch, registration, checkoutUrl) {
+  const to = member?.parentEmail?.trim()
+  if (!to) {
+    console.warn('[email] Payment pending email skipped — no parentEmail on member')
+    return false
+  }
+  const url = checkoutUrl || registration?.paymentCheckoutUrl || ''
+  if (!url) {
+    console.warn('[email] Payment pending email skipped — no checkout URL')
+    return false
+  }
+  const data = buildPaymentTemplateData(member, session, branch, registration, { checkoutUrl: url })
+  const { subject, html, text } = paymentPendingTemplate(data)
+  await sendEmail({ to, subject, html, text, branch })
+  return true
+}
+
+/**
+ * Email #6 — Payment receipt + registration confirmed.
+ * Sent after Square confirms payment.
+ */
+export async function sendPaymentReceiptEmail(member, session, branch, registrationId, registration) {
+  const to = member?.parentEmail?.trim()
+  if (!to) {
+    console.warn('[email] Payment receipt email skipped — no parentEmail on member')
+    return false
+  }
+  const data = {
+    ...buildPaymentTemplateData(member, session, branch, registration),
+    registrationId,
+  }
+  const { subject, html, text } = paymentReceiptTemplate(data)
+  const icalEvent = buildCalendarIcal({
+    registrationId,
+    session,
+    member,
+    branch,
+    method: 'REQUEST',
+    attendeeEmail: to,
+  })
+  await sendEmail({ to, subject, html, text, branch, icalEvent })
+  return true
+}
+
+/**
+ * Email #7 — Admin payment notification (branch inbox).
+ * Sent to branch.email when payment events occur.
+ */
+export async function sendAdminPaymentNotificationEmail(
+  branch,
+  member,
+  session,
+  registration,
+  eventType,
+  { daysBefore } = {}
+) {
+  const to = branch?.email?.trim()
+  if (!to) {
+    console.warn('[email] Admin payment notification skipped — no branch email')
+    return false
+  }
+  const data = {
+    ...buildPaymentTemplateData(member, session, branch, registration),
+    eventType,
+    parentEmail: member?.parentEmail || '',
+    daysBefore: daysBefore || null,
+  }
+  const { subject, html, text } = adminPaymentNotificationTemplate(data)
+  await sendEmail({ to, subject, html, text, branch })
+  return true
 }
 
 /**

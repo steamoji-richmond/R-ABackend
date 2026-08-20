@@ -61,6 +61,9 @@ const BranchSchema = new mongoose.Schema(
     // B.linkedBranchIds includes A).
     linkedBranchIds: { type: [String], default: [] },
 
+    // When false, branch is hidden from the public non-member sign-up form.
+    showInSignup: { type: Boolean, default: true, index: true },
+
     active: { type: Boolean, default: true, index: true },
   },
   { timestamps: true }
@@ -82,11 +85,21 @@ export function serializeBranchPublic(b) {
     region: b.region || '',
     country: b.country || '',
     phone: b.phone || '',
-    email: b.email || '',
     linkedBranchIds: Array.isArray(b.linkedBranchIds)
       ? b.linkedBranchIds.filter(Boolean)
       : [],
     active: b.active !== false,
+    showInSignup: b.showInSignup !== false,
+  }
+}
+
+/** Minimal branch info for the public non-member sign-up picker. */
+export function serializeBranchSignup(b) {
+  if (!b) return null
+  return {
+    id: b.id,
+    name: b.name || '',
+    city: b.city || '',
   }
 }
 
@@ -96,6 +109,7 @@ export function serializeBranch(b, { admin = false } = {}) {
   if (!admin) return serializeBranchPublic(b)
   return {
     ...serializeBranchPublic(b),
+    email: b.email || '',
     organizationId: b.organizationId || '',
     steamojiAuthToken: b.steamojiAuthToken || '',
     steamojiAuthCookie: b.steamojiAuthCookie || '',
@@ -104,6 +118,7 @@ export function serializeBranch(b, { admin = false } = {}) {
     squareAccessToken: b.squareAccessToken || '',
     squareLocationId: b.squareLocationId || '',
     squareApplicationId: b.squareApplicationId || '',
+    showInSignup: b.showInSignup !== false,
     createdAt: b.createdAt || null,
     updatedAt: b.updatedAt || null,
   }

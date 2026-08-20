@@ -44,6 +44,9 @@ export const config = {
 
   // Domain used in calendar event UIDs (must stay stable for cancel to match)
   calendarUidDomain: process.env.CALENDAR_UID_DOMAIN || 'steamoji.online',
+
+  // How long to wait after registration before emailing an abandoned checkout (ms)
+  abandonedPaymentDelayMs: num(process.env.ABANDONED_PAYMENT_DELAY_MS, 45 * 60 * 1000),
 }
 
 /** Browser requests with no Origin (curl, server-side) are always allowed. */

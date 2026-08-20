@@ -29,7 +29,9 @@ const RegistrationSchema = new mongoose.Schema(
     registeredDateAndTime: { type: Date, default: () => new Date() },
 
     priceAmount: { type: Number, default: 0, min: 0 },
-    currency: { type: String, default: 'USD', uppercase: true },
+    taxAmount: { type: Number, default: 0, min: 0 },
+    totalAmount: { type: Number, default: 0, min: 0 },
+    currency: { type: String, default: 'CAD', uppercase: true },
     membershipType: {
       type: String,
       enum: ['yearly', 'semi-yearly', 'none'],
@@ -46,6 +48,10 @@ const RegistrationSchema = new mongoose.Schema(
     paymentCheckoutUrl: { type: String, default: '' },
     paidAt: { type: Date, default: null },
     confirmationEmailSentAt: { type: Date, default: null },
+    paymentPendingEmailSentAt: { type: Date, default: null },
+    paymentAbandonedEmailSentAt: { type: Date, default: null },
+    paymentReminder3DaySentAt: { type: Date, default: null },
+    paymentReminder2DaySentAt: { type: Date, default: null },
   },
   { timestamps: true }
 )
